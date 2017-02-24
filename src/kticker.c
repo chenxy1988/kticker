@@ -29,7 +29,8 @@ static unsigned int old_tick;
 static unsigned char isTmrinit = TMR_NOT_INIT;
 
 tmr_list_t	timer_list_table;
-tmr_node_t	timer_node[MAX_TIMER_COUNT];
+//tmr_node_t	timer_node[MAX_TIMER_COUNT];
+tmr_node_t	*timer_node = NULL;
 
 static void sig_handler(int timer_sig)
 {
@@ -67,8 +68,8 @@ static void *task_timer()
 			counter--;
 		}
 		pthread_mutex_unlock(&tmr_mutex_tick);
-		
-		pthread_mutex_lock(&tmr_mutex_val);
+
+		pthread_mutex_lock(&tmr_mutex_val); //lock list
 		node = timer_list_table.tmr_use;
 		while(node != NULL)
 		{
@@ -109,10 +110,15 @@ int timer_init()
 		return TIMER_RET_FAIL;
 	}
 
+	timer_node = (tmr_node_t *)malloc(sizeof(tmr_node_t) * MAX_TIMER_COUNT);
+	if(timer_node == NULL){ //seems oom
+		return TIMER_RET_FAIL;
+	}
+
 	old_tick = 0x0;
 	
 	pthread_mutex_lock(&tmr_mutex_val);
-	memset(timer_node,0x0,sizeof(timer_node));
+	memset(timer_node,0x0,(sizeof(timer_node) * MAX_TIMER_COUNT));
 	for(i = 0;i< MAX_TIMER_COUNT;i++)
 	{
 		timer_node[i].timer_id = i; //add timer id
@@ -135,6 +141,7 @@ int timer_init()
 	pthread_cond_init(&tmr_tick_cond,NULL);
 
 	pthread_create(&timer_task_id,NULL,task_timer,NULL);
+	isTmrinit = TMR_ALREADY_INIT;
 
 	return TIMER_RET_OK;
 }
@@ -198,15 +205,46 @@ int create_timer(e_timer_type type,unsigned int *t_id)
 
 int delete_timer(unsigned int timer_id)
 {
+	tmr_node_t *node = &timer_node[timer_id];
+
 	if(timer_id > MAX_TIMER_COUNT){
 		return TIMER_RET_FAIL;//timer id invalid
 	}
+
 	if(timer_node[timer_id].timer_stats == TIMER_IDLE){
 		return TIMER_RET_FAIL; //timer stopped already
 	}
 
 	pthread_mutex_lock(&tmr_mutex_val);
-	timer_node[timer_id].timer_stats = TIMER_IDLE;
+
+	node = &timer_node[timer_id];
+
+	node->timer_stats = TIMER_IDLE;
+
+	if((node->p_next == NULL) && (node->p_pre == NULL)){
+		timer_list_table.tmr_use = NULL;
+	}else if((node->p_next != NULL) && (node->p_pre != NULL)){
+		node->p_pre->p_next = node->p_next;
+		node->p_next->p_pre = node->p_pre; //remove node from use list
+	}else{
+		if(node->p_next == NULL){
+			node->p_pre->p_next = NULL;
+		}else{
+			node->p_next->p_pre = NULL;
+		}
+	}
+
+	if(timer_list_table.tmr_idle != NULL){
+		node->p_next = timer_list_table.tmr_idle;
+		timer_list_table.tmr_idle->p_pre = node;
+	}else{
+		node->p_next = NULL;
+		node->p_pre = NULL;
+	}
+	timer_list_table.tmr_idle = node;
+
+	timer_list_table.use_count--;
+	timer_list_table.idle_count++;
 	pthread_mutex_unlock(&tmr_mutex_val);
 
 	return TIMER_RET_OK;
