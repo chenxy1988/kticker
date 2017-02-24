@@ -24,6 +24,7 @@ typedef struct tmr_node{
 	e_timer_type	timer_type;
 	e_timer_stats	timer_stats;
 	int tick_offset;
+	unsigned short int tick_limit;
 	void (*callbackfunction)(int argc,char **argv);
 	int argc;
 	char **argv;
@@ -39,5 +40,13 @@ typedef struct{
 	tmr_node_t *tmr_idle;
 	tmr_node_t *tmr_use;
 }tmr_list_t;
+
+
+int timer_init();
+int create_timer(e_timer_type type,unsigned int *t_id);
+int delete_timer(unsigned int timer_id);
+int start_timer(int timer_id,unsigned int count,void *func,int argc,char **argv);
+
+
 
 #endif
