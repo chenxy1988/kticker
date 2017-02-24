@@ -12,6 +12,7 @@
 #define TMR_ALREADY_INIT	1
 #define TMR_NOT_INIT	0
 #define DIV			2000
+#define TICKFRQ		200
 
 static pthread_t timer_task_id = 0;
 
@@ -52,9 +53,9 @@ static void *task_timer()
 
 	signal(SIGALRM,sig_handler);
 	timerval.it_interval.tv_sec = 0x0;
-	timerval.it_interval.tv_usec = DIV * 200;
+	timerval.it_interval.tv_usec = DIV * TICKFRQ;
 	timerval.it_value.tv_sec = 0x0;
-	timerval.it_value.tv_usec = DIV * 200;
+	timerval.it_value.tv_usec = DIV * TICKFRQ;
 	setitimer(ITIMER_REAL,&timerval,NULL);
 
 
@@ -267,7 +268,7 @@ int start_timer(int timer_id,unsigned int count,void *func,int argc,char **argv)
 		return TIMER_RET_FAIL;
 	}
 
-	tick_offset = count/200;
+	tick_offset = count / TICKFRQ;
 	pthread_mutex_lock(&tmr_mutex_tick);
 	tmp = cur_tick;
 	pthread_mutex_unlock(&tmr_mutex_tick);
