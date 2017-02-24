@@ -18,7 +18,10 @@ static pthread_t timer_task_id = 0;
 struct itimerval timerval;
 static pthread_mutex_t	tmr_mutex_val = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t	tmr_mutex_tick = PTHREAD_MUTEX_INITIALIZER;
-static pthread_mutex_t	task_exit_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/**P/V**/
+static pthread_cond_t	tmr_tick_cond;
+static unsigned int		counter = 0x0;
 
 
 static unsigned int cur_tick;
@@ -30,36 +33,22 @@ tmr_node_t	timer_node[MAX_TIMER_COUNT];
 
 static void sig_handler(int timer_sig)
 {
-	tmr_node_t *node;
 
 	pthread_mutex_lock(&tmr_mutex_tick);
 	cur_tick++;
 	old_tick = cur_tick;
-	pthread_mutex_unlock(&tmr_mutex_tick);
-	pthread_mutex_lock(&tmr_mutex_val);
-	node = timer_list_table.tmr_use;
-	while(node != NULL)
-	{
-		if (node->timer_stats == TIMER_START){
-			if (old_tick >= node->tick_limit){
-				node->callbackfunction(node->argc,node->argv);
-				if(node->timer_type ==TIMER_ONE){
-					node->timer_stats = TIMER_STOP;
-				}else{
-					node->tick_limit = old_tick+node->tick_offset;
-				}
-				
-			}
-		}
-
-		node = node->p_next;
+	counter++;
+	if(counter == 1){
+		pthread_cond_signal(&tmr_tick_cond);
 	}
-	pthread_mutex_unlock(&tmr_mutex_val);
+	pthread_mutex_unlock(&tmr_mutex_tick);
 	
 }
 
 static void *task_timer()
 {
+	tmr_node_t *node;
+
 	signal(SIGALRM,sig_handler);
 	timerval.it_interval.tv_sec = 0x0;
 	timerval.it_interval.tv_usec = DIV * 200;
@@ -67,7 +56,40 @@ static void *task_timer()
 	timerval.it_value.tv_usec = DIV * 200;
 	setitimer(ITIMER_REAL,&timerval,NULL);
 
-	pthread_mutex_lock(&task_exit_lock); //Task will exit after lock terminate 
+
+	while(1)
+	{
+		pthread_mutex_lock(&tmr_mutex_tick);
+		if(counter == 0){
+			pthread_cond_wait(&tmr_tick_cond,&tmr_mutex_tick);
+		}
+		if(counter > 0){
+			counter--;
+		}
+		pthread_mutex_unlock(&tmr_mutex_tick);
+		
+		pthread_mutex_lock(&tmr_mutex_val);
+		node = timer_list_table.tmr_use;
+		while(node != NULL)
+		{
+			if (node->timer_stats == TIMER_START){
+				if (old_tick >= node->tick_limit){
+					node->callbackfunction(node->argc,node->argv);
+					if(node->timer_type ==TIMER_ONE){
+						node->timer_stats = TIMER_STOP;
+					}else{
+						node->tick_limit = old_tick+node->tick_offset;
+					}
+				
+				}
+			}
+
+			node = node->p_next;
+		}
+		pthread_mutex_unlock(&tmr_mutex_val);
+		node = NULL;
+
+	}
 
 	printf("task_terminated\n");
 	return NULL;
@@ -86,8 +108,6 @@ int timer_init()
 	if(isTmrinit != TMR_NOT_INIT){ //Seems someone called it already, exit
 		return TIMER_RET_FAIL;
 	}
-
-	pthread_mutex_lock(&task_exit_lock);
 
 	old_tick = 0x0;
 	
@@ -111,6 +131,8 @@ int timer_init()
 	timer_list_table.tmr_idle = timer_node;
 	timer_list_table.tmr_use = NULL;
 	pthread_mutex_unlock(&tmr_mutex_val);
+
+	pthread_cond_init(&tmr_tick_cond,NULL);
 
 	pthread_create(&timer_task_id,NULL,task_timer,NULL);
 
